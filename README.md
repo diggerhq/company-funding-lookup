@@ -13,7 +13,7 @@ watch <url> | list-watches | disable-watch <id>   -> optional daily watches (exp
 
 ## Try it / deploy your own
 
-- **Hosted demo:** HOSTED_URL. No sign-in; one free lookup per visitor.
+- **Hosted demo:** https://company-funding-lookup.vercel.app. No sign-in; one free lookup per visitor.
 - **Deploy your own** (unlimited lookups, confirm entity candidates, daily watches, your own database): [one-click OpenComputer template](https://app.opencomputer.dev/new?repository-url=https%3A%2F%2Fgithub.com%2Fdiggerhq%2Fcompany-funding-lookup). The only required setting is `SEC_CONTACT_EMAIL`, the contact address SEC requires in every EDGAR request's User-Agent. A deployment without `OWNER_SIGNING_KEY` is single-owner: the dashboard playground and `npm run check` act as that owner.
 
 ### Hosted demo mode (`APP_MODE=public-try`)
@@ -202,6 +202,7 @@ For multi-user use: `APP_USERS="alice:…,bob:…" APP_SESSION_SECRET=<32+ chars
 ## Known limitations
 
 - Writes are model-mediated (see Persistence). They are verified by hash, but a run can fail to persist, and when it does the run says so.
+- The project database sometimes attaches to Code Mode late, or not at all, within a session. Observed in Production on 2026-10-05: about 13–20 s after session start in some sessions, never within one turn in others. The agent waits and retries through `funding_wait`. If the writes still can't be verified, the trusted client sends up to two `persist-retry` turns to the same session, and the agent re-runs its `persist_code` there.
 - The SEC throttle is per runtime process. Global ≤2 req/s holds only for traffic admitted through the app.
 - The per-session lookup cap is best-effort, because tool calls may land in different processes. The hard limits are the per-lookup budgets.
 - Entity extraction is pattern-based. Sites that never state a legal name produce a review queue, not a guess.
