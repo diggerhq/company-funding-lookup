@@ -27,3 +27,4 @@ example = "a-long-random-string"
 
 [template.secrets.CONTEXT_DEV_API_KEY]
 description = "Optional context.dev API key (https://context.dev). Used only for news and web search; SEC lookups never need it."
+required = false
