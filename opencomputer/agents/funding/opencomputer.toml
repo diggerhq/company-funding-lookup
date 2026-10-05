@@ -1,0 +1,4 @@
+# Committed agent identity. Keep `id` stable across deployments.
+schema = 1
+id = "funding"
+name = "Company Funding Lookup"

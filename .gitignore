@@ -1,0 +1,7 @@
+.env
+.env.local
+.env*.local
+.opencomputer/
+.vercel
+dist/
+node_modules/

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Funding Lookup</title>
+<style>
+  :root { --bg:#f7f6f3; --panel:#fff; --ink:#1d1d1b; --muted:#6b6a66; --line:#e3e1db; --accent:#2f5d50; --warn:#9a5b00; --bad:#a3302a; --chip:#eef2ef; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#151514; --panel:#1e1e1c; --ink:#ecebe7; --muted:#a19f99; --line:#33322f; --accent:#7fb8a6; --warn:#e0a54a; --bad:#e1786f; --chip:#24302c; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; } .sub { color:var(--muted); margin:0 0 24px; }
+  form.check { display:flex; gap:8px; } input[type=text], input[type=password] { flex:1; min-width:0; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--ink); font-size:15px; }
+  button { padding:10px 14px; border:1px solid var(--accent); background:var(--accent); color:var(--panel); border-radius:8px; font-weight:600; cursor:pointer; } button.ghost { background:transparent; color:var(--accent); } button:disabled { opacity:.5; cursor:default; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; margin-top:16px; }
+  .status { display:inline-block; padding:2px 8px; border-radius:999px; background:var(--chip); font-size:13px; font-weight:600; }
+  .status.financing_found { color:var(--accent); } .status.entity_review_required, .status.offering_only, .status.partial { color:var(--warn); } .status.failed { color:var(--bad); }
+  dl { display:grid; grid-template-columns: 180px 1fr; gap:6px 12px; margin:12px 0 0; } dt { color:var(--muted); } dd { margin:0; overflow-wrap:anywhere; }
+  pre { white-space:pre-wrap; overflow-wrap:anywhere; font:12.5px/1.45 ui-monospace, Menlo, monospace; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px; max-height:520px; overflow:auto; }
+  details summary { cursor:pointer; color:var(--muted); margin-top:12px; }
+  .cand { display:flex; gap:8px; align-items:center; justify-content:space-between; border-top:1px solid var(--line); padding:8px 0; } .cand:first-child { border-top:0; }
+  .muted { color:var(--muted); font-size:13px; } a { color:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-size:13px; } td, th { text-align:left; border-top:1px solid var(--line); padding:6px 4px; vertical-align:top; overflow-wrap:anywhere; }
+  @media (max-width: 560px) { dl { grid-template-columns: 1fr; } dt { margin-top:6px; } form.check { flex-direction:column; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Company funding lookup</h1>
+  <p class="sub">Enter a company website. We resolve the legal issuer and check SEC Form D filings and company announcements for the last known financing in public sources.</p>
+
+  <section id="login" class="panel" hidden>
+    <form id="loginForm" class="check"><input id="user" type="text" placeholder="user" autocomplete="username"><input id="pass" type="password" placeholder="passphrase" autocomplete="current-password"><button>Sign in</button></form>
+  </section>
+
+  <section id="app" hidden>
+    <form id="checkForm" class="check"><input id="url" type="text" placeholder="https://company.example" autocomplete="url" required><button id="go">Check</button></form>
+    <p class="muted" id="who"></p>
+    <div id="cta" class="panel" hidden></div>
+    <div id="out"></div>
+    <section class="panel" id="watchPanel"><strong>Your watches</strong> <span class="muted">Optional daily checks. Notifications are disabled until a destination is approved.</span><div id="watches" class="muted">Loading…</div></section>
+  </section>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const link = (u) => /^https:\/\//.test(u) ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>` : esc(u);
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { "content-type": "application/json" }, credentials: "same-origin" });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(j.error || `HTTP ${r.status}`), { template: j.template });
+  return j;
+}
+let currentUrl = "";
+let ME = {};
+function showCta(reason) {
+  if (!ME.templateUrl) return;
+  $("#cta").hidden = false;
+  $("#cta").innerHTML = `<strong>${esc(reason)}</strong><p class="muted">Deploy your own copy on OpenComputer in one click: unlimited lookups, confirm entity candidates, daily watches, and your own database. You'll need an SEC contact email (required by SEC for API access).</p><p><a class="button" href="${esc(ME.templateUrl)}" target="_blank" rel="noopener"><button type="button">Deploy your own</button></a></p>`;
+}
+async function init() {
+  ME = await api("/api/me");
+  if (ME.mode === "public-try") {
+    $("#app").hidden = false;
+    $("#watchPanel").hidden = true;
+    const t = ME.tries;
+    $("#who").textContent = t.remaining > 0 ? `You have ${t.remaining} free lookup${t.remaining === 1 ? "" : "s"}.` : "You've used your free lookup.";
+    if (t.remaining <= 0) {
+      $("#go").disabled = true;
+      showCta("Want to look up more companies?");
+      if (t.lastSessionId) poll(t.lastSessionId, Date.now());
+    }
+    return;
+  }
+  if (!ME.user) { $("#login").hidden = false; return; }
+  $("#app").hidden = false;
+  $("#who").textContent = `Signed in as ${ME.user} · ${ME.environment}${ME.mode === "dev" ? " · single-user dev mode" : ""}`;
+  loadWatches();
+}
+$("#loginForm").onsubmit = async (e) => { e.preventDefault(); try { await api("/api/login", { method: "POST", body: JSON.stringify({ user: $("#user").value, passphrase: $("#pass").value }) }); location.reload(); } catch (err) { alert(err.message); } };
+$("#checkForm").onsubmit = async (e) => { e.preventDefault(); currentUrl = $("#url").value.trim(); start("/api/check", { url: currentUrl }); };
+
+async function start(path, payload) {
+  $("#go").disabled = true;
+  $("#out").innerHTML = `<div class="panel">Starting…</div>`;
+  try {
+    const { sessionId } = await api(path, { method: "POST", body: JSON.stringify(payload) });
+    poll(sessionId, Date.now());
+  } catch (err) {
+    $("#out").innerHTML = `<div class="panel"><span class="status failed">Error</span> ${esc(err.message)}</div>`;
+    if (err.template) { showCta("Deploy your own copy to keep going."); return; }
+    $("#go").disabled = false;
+  }
+}
+async function poll(id, t0) {
+  try {
+    const r = await api(`/api/sessions/${encodeURIComponent(id)}`);
+    if (!r.settled) {
+      $("#out").innerHTML = `<div class="panel">Researching… <span class="muted">${Math.round((Date.now() - t0) / 1000)}s · session ${esc(id)} · ${esc(r.status)}</span><p class="muted">SEC requests are rate-limited; a lookup usually takes one to three minutes.</p></div>`;
+      return setTimeout(() => poll(id, t0), 3000);
+    }
+    render(r);
+    if (ME.mode === "public-try") { $("#who").textContent = "You've used your free lookup."; showCta("Want to look up more companies?"); return; }
+  } catch (err) { $("#out").innerHTML = `<div class="panel">${esc(err.message)}</div>`; }
+  $("#go").disabled = false;
+}
+const STATUS = { financing_found: "Financing found", offering_only: "Offering notice only", nothing_found_in_completed_searches: "Nothing found in completed searches", entity_review_required: "Entity review required", partial: "Partial lookup", failed: "Lookup failed" };
+function render(r) {
+  const x = r.result;
+  if (!x) {
+    $("#out").innerHTML = `<div class="panel"><span class="status failed">No result</span> <span class="muted">turn ${esc(r.turnStatus)}</span><pre>${esc(JSON.stringify(r.failures, null, 2))}</pre>${r.finalMessage ? `<pre>${esc(r.finalMessage)}</pre>` : ""}</div>`;
+    return;
+  }
+  const f = x.last_known_financing;
+  const p = r.persistence || {};
+  const persist = p.status === "verified" ? "Saved and verified" : p.status === "hash_mismatch" ? "Saved, but verification mismatched" : p.status === "missing" ? "Not saved" : esc(p.status || "unknown");
+  $("#out").innerHTML = `
+  <div class="panel">
+    <span class="status ${esc(x.status)}">${esc(STATUS[x.status] || x.status)}</span>
+    <span class="muted">checked ${esc(x.checked_at)} · ${esc(x.lookup_id)} · ${persist}</span>
+    <dl>
+      <dt>Company</dt><dd>${link(x.canonical_url || x.submitted_url)}</dd>
+      <dt>Verified issuer(s)</dt><dd>${x.verified_issuers.length ? x.verified_issuers.map((v) => `${esc(v.name)} · CIK ${esc(v.cik)} · ${esc(v.confidence)}`).join("<br>") : "None"}</dd>
+      <dt>Last known financing</dt><dd>${f ? esc(f.statement) : "None found in checked sources (this does not mean no round occurred)"}</dd>
+      ${f ? `<dt>Date</dt><dd>${esc(f.event_date || "unknown")} (${esc((f.date_type || "").replace(/_/g, " "))})</dd>
+      <dt>Amount</dt><dd>${f.amount_usd ? "$" + Number(f.amount_usd).toLocaleString("en-US") + " USD" : "unknown"} ${f.amount_basis ? `<span class="muted">${esc(f.amount_basis)}</span>` : ""}</dd>
+      <dt>Stage</dt><dd>${esc(f.stage || "not established (Form D does not report round names)")}</dd>
+      <dt>Category / confidence</dt><dd>${esc(f.category)} · ${esc(f.confidence)}</dd>` : ""}
+      ${f && f.filed ? `<dt>Filed</dt><dd>sold ${esc(f.filed.sold)} · offering ${esc(f.filed.offering)} · remaining ${esc(f.filed.remaining)} · first sale ${esc(f.filed.first_sale)} · filed ${esc(f.filed.first_filing_date)}${f.filed.latest_filing_date !== f.filed.first_filing_date ? ` (updated ${esc(f.filed.latest_filing_date)})` : ""} · investors ${esc(f.filed.investor_count ?? "not reported")}</dd>` : ""}
+      ${x.latest_sec_notice && !x.latest_sec_notice.is_new_financing ? `<dt>Latest SEC notice</dt><dd>${esc(x.latest_sec_notice.form)} ${esc(x.latest_sec_notice.accession)} filed ${esc(x.latest_sec_notice.filing_date)}: ${esc(x.latest_sec_notice.note)}</dd>` : ""}
+      <dt>Announcements</dt><dd>${esc(x.announcement_check.statement)}</dd>
+      <dt>Sources</dt><dd>${(x.source_urls || []).map(link).join("<br>") || "—"}</dd>
+      ${x.conflicts.length ? `<dt>Conflicts</dt><dd>${x.conflicts.map(esc).join("<br>")}</dd>` : ""}
+      ${x.coverage_gaps.length ? `<dt>Coverage gaps</dt><dd>${x.coverage_gaps.map(esc).join("<br>")}</dd>` : ""}
+    </dl>
+    ${x.review_candidates.length && ME.mode === "public-try" ? `<h3>Which entity is this company?</h3><p class="muted">These SEC filers match by name but are not verified, so their filings are not attributed. ${x.review_candidates.map((c) => `${esc(c.name)} (CIK ${esc(c.cik)})`).join(", ")}. Confirming a candidate is available in your own deployment.</p>` : ""}
+    ${x.review_candidates.length && ME.mode !== "public-try" ? `<h3>Which entity is this company?</h3><p class="muted">These SEC filers match by name but are not verified. Their filings are not attributed to the company until you confirm.</p>${x.review_candidates.map((c) => `<div class="cand"><span>${esc(c.name)} · CIK ${esc(c.cik)} <span class="muted">${esc(c.reason)}</span></span><span><button class="ghost" data-resolve="confirm" data-cik="${esc(c.cik)}">This is it</button> <button class="ghost" data-resolve="reject" data-cik="${esc(c.cik)}">Not it</button></span></div>`).join("")}` : ""}
+    <p><button class="ghost" id="evidenceBtn">Inspect evidence</button>${ME.mode === "public-try" ? "" : ` <button class="ghost" id="watchBtn">Watch daily…</button>`}</p>
+    <div id="evidence"></div>
+    ${r.readableReport ? `<details><summary>Full report</summary><pre>${esc(r.readableReport)}</pre></details>` : ""}
+    <p class="muted">${esc(x.disclaimer)}</p>
+  </div>`;
+  document.querySelectorAll("[data-resolve]").forEach((b) => (b.onclick = () => start("/api/resolve", { url: x.submitted_url, cik: b.dataset.cik, decision: b.dataset.resolve })));
+  $("#evidenceBtn").onclick = () => showEvidence(x.lookup_id);
+  if ($("#watchBtn")) $("#watchBtn").onclick = async () => {
+    if (!confirm(`Check ${x.canonical_domain} once a day? Notifications stay off until a destination is approved; daily checks are not real-time.`)) return;
+    await api("/api/watches", { method: "POST", body: JSON.stringify({ url: x.submitted_url, optIn: true }) });
+    setTimeout(loadWatches, 15000);
+  };
+}
+async function showEvidence(id) {
+  $("#evidence").innerHTML = "Loading…";
+  try {
+    const e = await api(`/api/lookups/${encodeURIComponent(id)}`);
+    $("#evidence").innerHTML = `<table><tr><th>Kind</th><th>Source</th><th>Excerpt</th><th>Dates</th></tr>${e.evidence.map((v) => `<tr><td>${esc(v.kind.replace(/_/g, " "))}</td><td>${link(v.url)}</td><td>${esc(v.excerpt)}</td><td>${esc(v.source_date || "—")}<br><span class="muted">retrieved ${esc(v.retrieved_at)}</span></td></tr>`).join("")}</table>`;
+  } catch (err) { $("#evidence").textContent = err.message; }
+}
+async function loadWatches() {
+  try {
+    const { watches } = await api("/api/watches");
+    $("#watches").innerHTML = watches.length ? watches.map((w) => `<div class="cand"><span>${link(w.company_url)} <span class="muted">${w.enabled ? "daily" : "disabled"} · last run ${esc(w.last_run_at || "never")}</span></span>${w.enabled ? `<button class="ghost" data-disable="${esc(w.id)}">Disable</button>` : ""}</div>`).join("") : "No watches. A lookup never subscribes you automatically.";
+    document.querySelectorAll("[data-disable]").forEach((b) => (b.onclick = async () => { await api(`/api/watches/${encodeURIComponent(b.dataset.disable)}/disable`, { method: "POST", body: "{}" }); setTimeout(loadWatches, 15000); }));
+  } catch (err) { $("#watches").textContent = err.message; }
+}
+init();
+</script>
+</body>
+</html>

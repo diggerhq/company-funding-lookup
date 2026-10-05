@@ -1,0 +1,25 @@
+{
+  "name": "company-funding-lookup",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "session": "opencomputer session",
+    "deploy": "opencomputer deploy",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc -p .",
+    "check": "tsx scripts/check.ts",
+    "web": "tsx web/server.ts",
+    "bundle:vercel": "esbuild web/vercel-entry.ts --bundle --platform=node --format=esm --target=node22 --outfile=api/index.js --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\""
+  },
+  "dependencies": {
+    "@opencomputer/agent": "^0.8.0",
+    "@opencomputer/sdk": "^2.3.0"
+  },
+  "devDependencies": {
+    "@opencomputer/cli": "^0.7.0",
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
